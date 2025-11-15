@@ -3,17 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TRPGスゴロク - スマホ版</title>
+<title>TRPGスゴロク - スマホ改良版</title>
 <style>
 body { margin:0; font-family: Arial,sans-serif; background:#f0f0f0; }
 #game-container { display:flex; flex-direction:column; height:100vh; }
-#map { background:#ccc; flex:1; position:relative; overflow:hidden; }
+/* 上半分：アニメーション+ログ */
+#top-half { flex:1; display:flex; flex-direction:column; }
+#map { flex:1; background:#ccc; position:relative; }
 #player-icon { position:absolute; width:40px; height:40px; background:red; border-radius:50%; transition:left 0.5s, top 0.5s; }
-#enemy-icon { position:absolute; width:40px; height:40px; background:purple; border-radius:50%; transition:left 0.5s, top 0.5s; }
-#log { background:#fff; height:80px; overflow-y:scroll; padding:5px; font-size:12px; border-top:2px solid #999; border-bottom:2px solid #999; }
+#enemy-icon { position:absolute; width:40px; height:40px; background:purple; border-radius:50%; transition:left 0.5s, top 0.5s; display:none; }
+#log { flex:1; background:#fff; overflow-y:scroll; padding:5px; font-size:12px; border-top:2px solid #999; border-bottom:2px solid #999; }
+/* 下半分：操作+リスナー */
+#bottom-half { flex:1; display:flex; flex-direction:column; }
 #controls { padding:5px; background:#eee; display:flex; flex-wrap:wrap; justify-content:center; }
 button { margin:2px; padding:8px 12px; font-size:14px; }
-#party { background:#fff; padding:5px; max-height:120px; overflow-y:auto; font-size:12px; }
+#party { flex:1; background:#fff; padding:5px; overflow-y:auto; font-size:12px; }
 .party-member { border:1px solid #aaa; background:#eef; margin:2px; padding:2px; display:flex; justify-content:space-between; }
 input[type="text"] { width:80px; font-size:12px; }
 .dice-roll { font-weight:bold; color:blue; }
@@ -22,13 +26,17 @@ input[type="text"] { width:80px; font-size:12px; }
 <body>
 
 <div id="game-container">
-  <div id="map">
-    <div id="player-icon"></div>
-    <div id="enemy-icon" style="display:none;"></div>
+  <div id="top-half">
+    <div id="map">
+      <div id="player-icon"></div>
+      <div id="enemy-icon"></div>
+    </div>
+    <div id="log"></div>
   </div>
-  <div id="log"></div>
-  <div id="controls"></div>
-  <div id="party"></div>
+  <div id="bottom-half">
+    <div id="controls"></div>
+    <div id="party"></div>
+  </div>
 </div>
 
 <script>
@@ -61,7 +69,10 @@ const partyDiv = document.getElementById("party");
 const playerIcon = document.getElementById("player-icon");
 const enemyIcon = document.getElementById("enemy-icon");
 
+// ---------------- ログ ----------------
 function log(text){ logDiv.innerHTML+=text+"<br>"; logDiv.scrollTop=logDiv.scrollHeight; }
+
+// ---------------- パーティ ----------------
 function updateParty(){
   partyDiv.innerHTML="";
   listeners.forEach((l,i)=>{
@@ -80,18 +91,43 @@ function addListener(){ const i=listeners.length; listeners.push({name:`リス�
 function removeListener(i){ listeners.splice(i,1); updateParty(); }
 function equipDice(target){ target.weapon=weaponList[Math.floor(Math.random()*weaponList.length)]; target.armor=armorList[Math.floor(Math.random()*armorList.length)]; log(`${target.name}の装備決定: ${target.weapon}/${target.armor}`); }
 
-// ---------------- 初期化 ----------------
-function startGame(){
-  log("ゲーム開始！装備をダイスで決定！");
-  equipDice(player); listeners.forEach(l=>equipDice(l));
-  updateParty();
-  controlsDiv.innerHTML="";
-  addButton("デートコース", ()=>nextMove());
-  addButton("特訓コース", ()=>nextMove());
+// ---------------- ボタン管理 ----------------
+function setButtons(buttons){
+  controlsDiv.innerHTML=""; // 前のボタンをクリア
+  buttons.forEach(b=>{
+    const btn = document.createElement("button");
+    btn.textContent = b.text;
+    btn.onclick = b.cb;
+    controlsDiv.appendChild(btn);
+  });
 }
 
-// ---------------- UI ----------------
-function addButton(text, cb){ const btn=document.createElement("button"); btn.textContent=text; btn.onclick=cb; controlsDiv.appendChild(btn); }
+// ---------------- ゲーム開始前フロー ----------------
+function startGame(){
+  log("リスナーセットを行ってください。");
+  updateParty();
+  setButtons([
+    {text:"リスナー準備完了", cb:()=>courseSelection()}
+  ]);
+}
+
+// ---------------- コース選択 ----------------
+function courseSelection(){
+  log("コースを選んでください。");
+  setButtons([
+    {text:"デートコース", cb:()=>equipAll()},
+    {text:"特訓コース", cb:()=>equipAll()}
+  ]);
+}
+
+// ---------------- 装備ダイス ----------------
+function equipAll(){
+  log("装備ダイスを振ります！");
+  equipDice(player);
+  listeners.forEach(l=>equipDice(l));
+  updateParty();
+  setButtons([{text:"スタート", cb:()=>nextMove()}]);
+}
 
 // ---------------- マス進行 ----------------
 function nextMove(){
@@ -104,8 +140,10 @@ function moveAnimation(callback){
   setTimeout(()=>{
     log(`マス ${pos+1} に到着！`);
     callback();
-  }, 600); // 移動アニメ0.6秒
+  }, 600);
 }
+
+// ---------------- ダイス ----------------
 function diceRoll(){
   const roll = Math.floor(Math.random()*6)+1;
   log(`🎲 ダイスを振った！ 出目は <span class="dice-roll">${roll}</span>`);
@@ -119,35 +157,11 @@ function diceRoll(){
       case "item": items.push("アイテム"); break;
     }
     pos++;
-    addButton("次のマスへ", nextMove);
-  }, 800); // ダイス演出0.8秒
+    setButtons([{text:"次のマスへ", cb:nextMove}]);
+  }, 800);
 }
 
-// ---------------- 戦闘（簡易） ----------------
-function battleEvent(){
-  enemyIcon.style.display="block";
-  log("敵と遭遇！攻撃ボタンで戦闘開始");
-  controlsDiv.innerHTML="";
-  addButton("攻撃", ()=>{
-    log("攻撃！敵にダメージ");
-    enemyIcon.style.display="none";
-    pos++;
-    addButton("次のマスへ", nextMove);
-  });
-}
-
-// ---------------- 分岐 ----------------
-function branchEvent(){
-  log("分岐マス！装備更新可能");
-  controlsDiv.innerHTML="";
-  addButton("装備更新＆コース移動", ()=>{
-    equipDice(player); listeners.forEach(l=>equipDice(l));
-    pos++; nextMove();
-  });
-  addButton("そのまま進む", ()=>{ pos++; nextMove(); });
-}
-
-// ---------------- 初期化呼び出し ----------------
+// ---------------- 初期化 ----------------
 startGame();
 updateParty();
 </script>
