@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRPGスゴロク</title>
+<style>
+body { font-family: Arial, sans-serif; padding:10px; background:#fafafa; }
+#log { border:1px solid #ccc; padding:10px; height:300px; overflow-y:scroll; margin-bottom:10px; background:#fff;}
+button { padding:6px 12px; margin:4px; font-size:14px; }
+#status { margin-bottom:10px; max-height:200px; overflow-y:auto; border:1px solid #ccc; padding:5px; background:#fff;}
+.listener { display:inline-block; width:150px; border:1px solid #aaa; margin:2px; padding:2px; background:#eef; font-size:12px; }
+</style>
+</head>
+<body>
+
+<h2>TRPGスゴロク</h2>
+
+<div id="status"></div>
+<div id="log"></div>
+<div id="controls"></div>
+
+<script>
+// ---------- ゲームデータ ----------
+const map = Array.from({length:30}, (_,i)=>{
+  if([2,7,12,17,23,27].includes(i+1)) return {id:i+1,type:"battle", story:`敵と遭遇！マス${i+1}`};
+  if([10,20].includes(i+1)) return {id:i+1,type:"branch", story:`分岐マス！装備更新可能。`};
+  if([5,9,15,19,25,29].includes(i+1)) return {id:i+1,type:"special", story:`特別マス！応援ポイント獲得`};
+  if(i===29) return {id:i+1,type:"boss", story:`ボス登場！嫉妬の魔王アンチゼム！`};
+  return {id:i+1,type:"dice", story:`ダイスマス！何が起こるか…`};
+});
+
+const diceResults = [
+  {roll:1, effect:"nothing", text:"静かな時間が流れた…"},
+  {roll:2, effect:"support", value:1, text:"リスナーたちの声援が届いた！応援ポイント +1"},
+  {roll:3, effect:"heal", value:25, text:"みんなの笑顔に励まされ、HP25%回復！"},
+  {roll:4, effect:"heal", value:50, text:"特別な差し入れでリスナー全員大回復！"},
+  {roll:5, effect:"poison", text:"誰かが毒入りお菓子を食べた…！"},
+  {roll:6, effect:"item", text:"お宝を見つけた！アイテム1つ入手！"}
+];
+
+const weaponList=["剣","弓","杖","斧"];
+const armorList=["鎧","ローブ","革鎧","盾"];
+
+let player = {name:"ライバー", hp:100, maxHp:100, attack:50, defense:30, weapon:"", armor:"", skills:["全体回復","単体回復","全体攻撃力UP"]};
+let pos=0;
+let supportPoints=0;
+let items=[];
+let listeners = [];
+for(let i=0;i<10;i++){
+  listeners.push({name:`リスナー${i+1}`, hp:50+Math.floor(Math.random()*20), maxHp:50+Math.floor(Math.random()*20), attack:15+Math.floor(Math.random()*10), status:[], weapon:"", armor:""});
+}
+
+let boss = {name:"嫉妬の魔王 アンチゼム", hp:5000, attack:50, status:[]};
+
+// ---------- UI ----------
+const logDiv = document.getElementById("log");
+const controlsDiv = document.getElementById("controls");
+const statusDiv = document.getElementById("status");
+
+function log(text){ logDiv.innerHTML+=text+"<br>"; logDiv.scrollTop=logDiv.scrollHeight; }
+
+function updateStatus(){
+  let playerStatus = `HP: ${player.hp}/${player.maxHp} [${player.weapon}/${player.armor}] | 応援: ${supportPoints} | マス: ${pos+1}`;
+  let listenerHtml = listeners.map(l=>`<div class="listener">${l.name}<br>${l.hp}/${l.maxHp} HP<br>${l.weapon}/${l.armor}<br>${l.status.join(",")}</div>`).join("");
+  let bossStatus = `ボスHP: ${boss.hp}`;
+  statusDiv.innerHTML = playerStatus+"<br>"+listenerHtml+"<br>"+bossStatus;
+}
+
+function addButton(text,cb){ const btn=document.createElement("button"); btn.textContent=text; btn.onclick=cb; controlsDiv.appendChild(btn); }
+
+// ---------- 初期装備 ----------
+function equipDice(target){
+  const w = weaponList[Math.floor(Math.random()*weaponList.length)];
+  const a = armorList[Math.floor(Math.random()*armorList.length)];
+  target.weapon=w; target.armor=a;
+  log(`${target.name}の装備決定: ${w}/${a}`);
+}
+
+// ---------- ゲーム処理 ----------
+function startGame(){
+  log("配信開始！装備をダイスで決めます！");
+  equipDice(player);
+  listeners.forEach(l=>equipDice(l));
+  log("デートコースか特訓コースを選んでください。");
+  controlsDiv.innerHTML='';
+  addButton("デートコース",()=>nextMove());
+  addButton("特訓コース",()=>nextMove());
+}
+
+// ---------- マス移動 ----------
+function nextMove(){
+  if(pos>=map.length){ log("全マスクリア！"); return; }
+  const current=map[pos];
+  log(current.story);
+  updateStatus();
+  controlsDiv.innerHTML='';
+  switch(current.type){
+    case "dice": diceEvent(); break;
+    case "battle": battleEvent(); break;
+    case "special": specialEvent(); break;
+    case "branch": branchEvent(); break;
+    case "boss": bossEvent(); break;
+  }
+}
+
+// ---------- マスイベント ----------
+function diceEvent(){
+  const roll=Math.floor(Math.random()*6)+1;
+  const result=diceResults.find(d=>d.roll===roll);
+  log(result.text);
+  if(result.effect==="support") supportPoints+=result.value;
+  if(result.effect==="heal"){ player.hp=Math.min(player.maxHp, player.hp+result.value); listeners.forEach(l=>l.hp=Math.min(l.maxHp, l.hp+result.value)); }
+  if(result.effect==="poison"){ const t=listeners[Math.floor(Math.random()*listeners.length)]; t.status.push("poison"); }
+  if(result.effect==="item"){ items.push("アイテム"); }
+  pos++; addButton("次のマスへ", nextMove);
+  updateStatus();
+}
+
+function battleEvent(){
+  log("敵と戦闘！攻撃して倒そう！");
+  controlsDiv.innerHTML='';
+  addButton("攻撃", ()=>{
+    log("通常戦闘：サクサク進行！");
+    pos++; addButton("次のマスへ", nextMove);
+  });
+}
+
+function specialEvent(){ log("特別マス！応援ポイント +1"); supportPoints++; pos++; addButton("次のマスへ", nextMove); }
+
+function branchEvent(){
+  log("分岐マス！装備更新＋コース選択可能！");
+  controlsDiv.innerHTML='';
+  addButton("装備更新＆コース移動", ()=>{
+    equipDice(player);
+    listeners.forEach(l=>equipDice(l));
+    log("コースを移動しました！");
+    pos++; nextMove();
+  });
+  addButton("そのまま進む", ()=>{
+    log("コースはそのまま進行！");
+    pos++; nextMove();
+  });
+}
+
+// ---------- ボス戦 ----------
+function bossEvent(){
+  log(`ボス戦！${boss.name}登場！`);
+  controlsDiv.innerHTML='';
+  addButton("攻撃", bossTurn);
+  addButton("スキル", useSkill);
+}
+
+// ---------- ボス戦ターン ----------
+function bossTurn(){
+  const dmg = player.attack + Math.floor(Math.random()*50);
+  log(`ライバーの攻撃でボスに${dmg}ダメージ！`);
+  boss.hp -= dmg;
+  listeners.forEach(l=>{
+    if(!l.status.includes("stun")){
+      let lDmg=l.attack + Math.floor(Math.random()*10);
+      if(l.status.includes("tempted")){
+        let fDmg=Math.floor(l.attack*0.1);
+        listeners.forEach(f=>{if(f!==l) f.hp-=fDmg;});
+        log(`${l.name}は誘惑され味方に${fDmg}ダメージ！`);
+        l.status=l.status.filter(s=>s!=="tempted");
+      } else { boss.hp-=lDmg; log(`${l.name}の攻撃でボスに${lDmg}ダメージ！`); }
+    } else log(`${l.name}は行動不能！`);
+  });
+
+  const action=Math.floor(Math.random()*3);
+  if(action===0){ boss.attack*=1.2; log("ボスは攻撃力アップ！"); }
+  else if(action===1){
+    const t=listeners[Math.floor(Math.random()*listeners.length)];
+    const dice=Math.floor(Math.random()*2)+1;
+    if(dice===1){ t.status.push("tempted"); log(`ボスは${t.name}を誘惑！成功！`); }
+    else log(`ボスは${t.name}を誘惑！失敗！`);
+  } else { const t=listeners[Math.floor(Math.random()*listeners.length)]; t.status.push("stun"); log(`ボスは${t.name}を行動不能にした！`); }
+
+  listeners.forEach(l=>{ if(l.status.includes("poison")){ l.hp-=5; log(`${l.name}は毒で5ダメージ！`); } });
+
+  updateStatus();
+
+  if(boss.hp<=0){ log("ボス撃破！ゲームクリア！"); controlsDiv.innerHTML=''; return; }
+  if(player.hp<=0){
+    if(supportPoints>=5){
+      log("応援ポイントによりライバー復活！一撃必殺判定！");
+      if(Math.floor(Math.random()*2)===1){ log("一撃必殺成功！ボス撃破！ゲームクリア！"); controlsDiv.innerHTML=''; return; }
+      else { player.hp=50; log("復活したがボスは残っている！戦闘継続！"); }
+    } else { log("ライバー敗北！ゲームオーバー！"); controlsDiv.innerHTML=''; return; }
+  }
+
+  addButton("次ターン攻撃", bossTurn);
+}
+
+// ---------- スキル ----------
+function useSkill(){
+  controlsDiv.innerHTML='';
+  addButton("リスナー全体15%回復", ()=>{
+    listeners.forEach(l=>l.hp=Math.min(l.maxHp, l.hp+Math.floor(l.maxHp*0.15)));
+    log("リスナー全体HP15%回復！");
+    bossTurn();
+  });
+  addButton("リスナー単体25%回復", ()=>{
+    let t=listeners[0];
+    t.hp=Math.min(t.maxHp,t.hp+Math.floor(t.maxHp*0.25));
+    log(`${t.name}HP25%回復！`);
+    bossTurn();
+  });
+  addButton("リスナー全体攻撃力アップ", ()=>{
+    listeners.forEach(l=>l.attack*=1.2);
+    log("リスナー全体攻撃力3ターンアップ！");
+    bossTurn();
+  });
+}
+
+// ---------- 初期化 ----------
+startGame();
+updateStatus();
+</script>
+</body>
+</html>
